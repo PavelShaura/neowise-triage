@@ -1,0 +1,32 @@
+# Зависимости
+node_modules/
+
+# Переменные окружения и ключи
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Логи и отладка
+*.log
+npm-debug.log*
+logs/
+
+# Покрытие тестами
+coverage/
+.nyc_output/
+
+# IDE и редакторы
+.idea/
+.vscode/
+*.swp
+*~
+
+# Python-окружение (локальное, к проекту не относится)
+.venv/
+__pycache__/
+
+# ОС
+.DS_Store
+Thumbs.db
