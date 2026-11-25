@@ -8,28 +8,98 @@
     body { max-width: 40rem; margin: 2rem auto; padding: 0 1rem; font: 1rem/1.5 system-ui, sans-serif; }
     textarea { box-sizing: border-box; display: block; width: 100%; margin: .5rem 0; padding: .5rem; font: inherit; }
     button { padding: .4rem .8rem; font: inherit; }
-    pre { white-space: pre-wrap; }
+    pre { white-space: pre-wrap; padding: .5rem; border: 1px solid #ccc; border-radius: .25rem; }
+    #status { padding: .5rem; border-radius: .25rem; }
+    #status:empty { display: none; }
+    #status[data-kind="error"] { background: #fde8e8; }
+    #status[data-kind="manual"] { background: #fff4d6; }
+    #status[data-kind="ok"] { background: #e6f4ea; }
   </style>
 </head>
 <body>
   <h1>Входящие заявки</h1>
-  <form>
+  <form novalidate>
     <label for="message">Текст заявки</label>
     <textarea id="message" rows="4"></textarea>
     <button type="submit">Разобрать заявку</button>
   </form>
-  <pre id="result" aria-live="polite"></pre>
+
+  <p id="status" role="status" aria-live="polite"></p>
+
+  <section id="result" hidden>
+    <p><strong>Тема:</strong> <span id="topic"></span></p>
+    <p><strong>Черновик ответа</strong> (проверьте перед отправкой клиенту):</p>
+    <pre id="draft"></pre>
+  </section>
+
   <script type="module">
+    const TOPIC_LABELS = { delivery: "Доставка", pricing: "Цены и стоимость", other: "Другое" };
+
     const form = document.querySelector("form");
+    const message = document.querySelector("#message");
+    const status = document.querySelector("#status");
     const result = document.querySelector("#result");
+    const topicEl = document.querySelector("#topic");
+    const draftEl = document.querySelector("#draft");
+
+    // Номер последнего отправленного запроса: ответы на более старые запросы отбрасываем.
+    let lastRequestId = 0;
+
+    function setStatus(text, kind) {
+      status.textContent = text;
+      status.dataset.kind = kind;
+    }
+
+    function clearResult() {
+      result.hidden = true;
+      topicEl.textContent = "";
+      draftEl.textContent = "";
+    }
+
+    function showResult(topic, draft) {
+      topicEl.textContent = TOPIC_LABELS[topic] ?? topic;
+      draftEl.textContent = draft;
+      result.hidden = false;
+    }
+
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
-      const reply = await fetch("/api/triage", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: document.querySelector("#message").value }),
-      });
-      result.textContent = JSON.stringify(await reply.json(), null, 2);
+      const requestId = ++lastRequestId;
+      // Старый черновик убираем сразу, чтобы его нельзя было принять за ответ на новую заявку.
+      clearResult();
+
+      const text = message.value;
+      if (text.trim() === "") {
+        setStatus("Введите текст заявки.", "error");
+        message.focus();
+        return;
+      }
+
+      setStatus("Разбираем заявку…", "pending");
+      let data = null;
+      try {
+        const reply = await fetch("/api/triage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+        data = await reply.json();
+      } catch {
+        data = null; // сеть или не-JSON ответ: ведём себя как при сбое модели
+      }
+
+      if (requestId !== lastRequestId) return;
+
+      if (data?.status === "ready" && typeof data.draft === "string" && data.draft.trim() !== "") {
+        showResult(data.topic, data.draft);
+        setStatus("Готово. Проверьте тему и черновик перед отправкой клиенту.", "ok");
+      } else if (data?.status === "invalid_input") {
+        setStatus("Введите текст заявки.", "error");
+      } else if (data?.status === "payload_too_large") {
+        setStatus("Текст заявки слишком длинный (больше 64 КБ). Сократите его или разберите заявку вручную.", "error");
+      } else {
+        setStatus("AI не смог разобрать заявку. Разберите её вручную: тема и черновик не сформированы.", "manual");
+      }
     });
   </script>
 </body>
